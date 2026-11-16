@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Thử Thách Tri Thức</title>
+<title>Ai là tỷ phú</title>
 <meta name="description" content="Trò chơi trắc nghiệm theo tổ cho bài Định luật tuần hoàn: 10 câu, 4 quyền trợ giúp, tính điểm theo mức độ và báo cáo kết quả.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -326,15 +326,17 @@ body.present .kbd-hint { display: none; }
 <header class="topbar">
   <button class="brand" id="brandBtn" type="button" aria-label="Về màn bắt đầu">
     <span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.6V14"/><circle cx="12" cy="17.5" r=".6" fill="currentColor"/><circle cx="12" cy="12" r="9.5"/></svg></span>
-    <span class="brand-name">Thử Thách Tri Thức</span>
+    <span class="brand-name">Ai là tỷ phú</span>
   </button>
   <div class="tb-right">
     <button class="round-btn" id="btnPresent" type="button" aria-label="Bật chế độ trình chiếu" title="Chế độ trình chiếu (phím P)"></button>
+    <button class="round-btn" id="btnMusic" type="button" aria-label="Nhạc nền"></button>
     <button class="round-btn" id="btnSound" type="button" aria-label="Âm thanh"></button>
     <button class="round-btn" id="btnFull" type="button" aria-label="Toàn màn hình" title="Toàn màn hình"></button>
   </div>
 </header>
 <div class="present-bar">
+  <button class="round-btn" id="pbMusic" type="button" aria-label="Nhạc nền"></button>
   <button class="round-btn" id="pbSound" type="button" aria-label="Âm thanh"></button>
   <button class="round-btn" id="pbFull" type="button" aria-label="Toàn màn hình"></button>
   <button class="btn" id="pbExit" type="button">Thoát trình chiếu</button>
@@ -352,7 +354,7 @@ body.present .kbd-hint { display: none; }
         <circle cx="32" cy="43.5" r="1.6" fill="currentColor" stroke="none"/>
       </svg>
     </div>
-    <h1>Thử Thách Tri Thức</h1>
+    <h1>Ai là tỷ phú</h1>
     <p class="start-sub">Định luật tuần hoàn</p>
     <button class="start-btn" id="btnStart" type="button"></button>
   </div>
@@ -485,6 +487,8 @@ function h(tag, props, ...kids) {
   return el;
 }
 const ICONS = {
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  musicOff: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/><path d="M3 3l18 18"/>',
   phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
   council: '<path d="M3 5h12v8H8l-4 3v-3H3z"/><path d="M18 9h3v8h-1v3l-4-3H9v-1"/>',
   expert: '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/><path d="M22 9v6"/>',
@@ -552,7 +556,7 @@ const RULES = {
 const LEVELS = { NB: 'Nhận biết', TH: 'Thông hiểu', VD: 'Vận dụng', VDC: 'Vận dụng cao' };
 const LETTERS = ['A', 'B', 'C', 'D'];
 const ptsOf = lv => toMilli(RULES.pts[lv]);
-const prefs = Object.assign({ sound: true, className: '' }, lsGet(K.prefs, {}));
+const prefs = Object.assign({ sound: true, music: true, className: '' }, lsGet(K.prefs, {}));
 function savePrefs() { lsSet(K.prefs, prefs); }
 
 /* ---------- Bộ câu hỏi: Định luật tuần hoàn (4 NB, 3 TH, 2 VD, 1 VDC) ---------- */
@@ -608,43 +612,146 @@ async function initCloud() {
   try { Store.db = await C.use('db'); } catch { Store.db = null; }
 }
 
-/* ---------- Âm thanh ---------- */
+/* ---------- Âm thanh: tổng hợp bằng Web Audio, không dùng file nhạc ---------- */
+const NOTE = { F2: 87.31, G2: 98, A2: 110, C3: 130.81, F3: 174.61, G3: 196, A3: 220, B3: 246.94, C4: 261.63, D4: 293.66, E4: 329.63, G4: 392, C5: 523.25, E5: 659.25, G5: 783.99, A5: 880, C6: 1046.5 };
+const MUSIC_VOL = 0.3;
 const Sound = {
-  ctx: null, noiseBuf: null,
+  ctx: null, master: null, sfx: null, music: null, noiseBuf: null,
   ensure() {
-    if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { this.ctx = null; } }
+    if (!this.ctx) {
+      try {
+        const c = new (window.AudioContext || window.webkitAudioContext)();
+        const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+        this.master = c.createGain(); this.master.gain.value = 0.9;
+        this.sfx = c.createGain(); this.sfx.gain.value = 1;
+        this.music = c.createGain(); this.music.gain.value = MUSIC_VOL;
+        this.sfx.connect(this.master); this.music.connect(this.master); this.master.connect(comp).connect(c.destination);
+        const len = c.sampleRate * 2; this.noiseBuf = c.createBuffer(1, len, c.sampleRate);
+        const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        this.ctx = c;
+      } catch { this.ctx = null; }
+    }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     return this.ctx;
   },
-  tone(freq, dur, { type = 'sine', vol = 0.12, at = 0, slide = null } = {}) {
-    if (!prefs.sound) return;
-    const c = this.ensure(); if (!c) return;
-    const t0 = c.currentTime + at;
-    const o = c.createOscillator(), g = c.createGain();
-    o.type = type; o.frequency.setValueAtTime(freq, t0);
-    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t0 + dur);
-    g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    o.connect(g).connect(c.destination); o.start(t0); o.stop(t0 + dur + 0.05);
+  play(fn) { if (!prefs.sound || !this.ensure()) return; try { fn(this.ctx.currentTime + .02); } catch { /* ignore audio errors */ } },
+  osc(freq, t, dur, { type = 'sine', vol = .12, attack = .01, slide = null, bus = null, cutoff = null, detune = 0 } = {}) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t); o.detune.value = detune;
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    let node = o;
+    if (cutoff) { const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff; o.connect(f); node = f; }
+    node.connect(g).connect(bus || this.sfx); o.start(t); o.stop(t + dur + .05);
   },
-  hit(at, vol = 0.18) {
-    if (!prefs.sound) return;
-    const c = this.ensure(); if (!c) return;
-    if (!this.noiseBuf) { const len = Math.floor(c.sampleRate * 0.12); this.noiseBuf = c.createBuffer(1, len, c.sampleRate); const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len); }
-    const src = c.createBufferSource(); src.buffer = this.noiseBuf;
-    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 900;
-    const g = c.createGain(); g.gain.value = vol;
-    src.connect(f).connect(g).connect(c.destination); src.start(c.currentTime + at);
+  noise(t, dur, { vol = .2, type = 'bandpass', freq = 1000, q = 1, to = null, attack = .005, bus = null } = {}) {
+    const c = this.ctx, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noiseBuf; f.type = type; f.frequency.setValueAtTime(freq, t); f.Q.value = q;
+    if (to) f.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + attack); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f).connect(g).connect(bus || this.sfx); s.start(t, Math.random() * 1.5); s.stop(t + dur + .05);
   },
-  start() { [392, 494, 587, 784].forEach((f, i) => this.tone(f, 0.28, { type: 'triangle', at: i * 0.11 })); },
-  select() { this.tone(660, 0.07, { type: 'square', vol: 0.04 }); },
-  roll(total) { let t = 0, step = 0.16; while (t < total) { this.hit(t, 0.08 + 0.1 * t / total); t += step; step = Math.max(0.045, step * 0.9); } },
-  correct() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.32, { type: 'triangle', at: i * 0.08 })); },
-  wrong() { this.tone(220, 0.55, { type: 'sawtooth', vol: 0.07, slide: 110 }); this.tone(208, 0.55, { type: 'square', vol: 0.03, slide: 104 }); },
-  tick() { this.tone(1250, 0.04, { type: 'square', vol: 0.03 }); },
-  help() { this.tone(880, 0.12); this.tone(1320, 0.16, { at: 0.1 }); },
-  fanfare() { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.4, { type: 'triangle', at: i * 0.12, vol: 0.13 })); }
+  kick(t, vol = .9, bus = null) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + .14);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + .32);
+    o.connect(g).connect(bus || this.sfx); o.start(t); o.stop(t + .35);
+  },
+  snare(t, vol = .35, bus = null) { this.noise(t, .16, { vol, type: 'highpass', freq: 1400, bus }); this.osc(190, t, .1, { type: 'triangle', vol: vol * .5, bus }); },
+  hat(t, vol = .1, bus = null) { this.noise(t, .045, { vol, type: 'highpass', freq: 7500, bus }); },
+  clap(t, vol = .3, bus = null) { for (let i = 0; i < 3; i++) this.noise(t + i * .012, .09, { vol, freq: 1300, q: 1.5, bus }); },
+  chord(notes, t, dur, vol = .06) { notes.forEach(f => { this.osc(f, t, dur, { type: 'sawtooth', vol, cutoff: 3000, detune: -8 }); this.osc(f, t, dur, { type: 'sawtooth', vol, cutoff: 3000, detune: 8 }); }); },
+  applause(t, dur = 2, level = 1) {
+    const n = Math.floor(dur * 55 * level);
+    for (let i = 0; i < n; i++) {
+      const x = Math.random() * dur, env = Math.min(1, x / .25) * Math.max(0, 1 - x / dur);
+      this.noise(t + x, .02 + Math.random() * .04, { vol: Math.max(.002, (.05 + Math.random() * .08) * env * level), freq: 900 + Math.random() * 2500, q: 2 });
+    }
+  },
+
+  /* Hiệu ứng theo từng khoảnh khắc */
+  intro() { this.play(t => {
+    this.noise(t, .9, { vol: .25, freq: 300, to: 5000, q: 2, attack: .8 });
+    [NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5].forEach((f, i) => this.osc(f, t + .15 + i * .12, .35, { type: 'square', vol: .06, cutoff: 3000 }));
+    this.kick(t + .9, 1); this.clap(t + .9, .35);
+    this.chord([NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5], t + .9, 1.2, .07);
+    this.noise(t + .9, 1.4, { vol: .12, type: 'highpass', freq: 6000 });
+  }); },
+  question() { this.play(t => {
+    this.noise(t, .35, { vol: .22, freq: 4000, to: 400, q: 1.2, attack: .02 });
+    this.osc(NOTE.E5, t + .25, .5, { vol: .12 }); this.osc(NOTE.A5, t + .32, .6, { vol: .1 });
+  }); },
+  select() { this.play(t => { this.osc(880, t, .06, { type: 'square', vol: .05, cutoff: 3000 }); this.osc(1320, t + .04, .08, { vol: .06 }); }); },
+  blip() { this.play(t => { this.osc(660, t, .08, { type: 'triangle', vol: .08 }); this.osc(990, t + .06, .1, { type: 'triangle', vol: .08 }); }); },
+  draw() { this.play(t => { for (let i = 0; i < 10; i++) this.osc(500 + i * 90, t + i * .05, .05, { type: 'square', vol: .04, cutoff: 3000 }); this.osc(NOTE.C6, t + .55, .4, { vol: .1 }); }); },
+  suspense(dur) { this.play(t => {
+    this.noise(t, dur, { vol: .18, freq: 250, to: 3500, q: 3, attack: dur * .9 });
+    this.osc(110, t, dur, { type: 'sawtooth', vol: .05, slide: 220, cutoff: 900, attack: dur * .8 });
+    let x = 0, step = .16;
+    while (x < dur - .05) { this.snare(t + x, .08 + .22 * x / dur); x += step; step = Math.max(.045, step * .9); }
+  }); },
+  correct() { this.play(t => {
+    this.kick(t, 1); this.clap(t, .4);
+    this.chord([NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5], t, .7, .06);
+    [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6, NOTE.G5, NOTE.C6].forEach((f, i) => this.osc(f, t + .12 + i * .07, .25, { vol: .08 }));
+    this.applause(t + .1, 2.2, .7);
+  }); },
+  wrong() { this.play(t => {
+    this.kick(t, .7);
+    [196, 185, 174.6, 164.8].forEach((f, i) => this.osc(f, t + i * .28, i === 3 ? .9 : .3, { type: 'sawtooth', vol: .09, cutoff: 900, slide: i === 3 ? 150 : null }));
+  }); },
+  buzzer() { this.play(t => { this.osc(118, t, .9, { type: 'square', vol: .1, cutoff: 1500 }); this.osc(123, t, .9, { type: 'sawtooth', vol: .08, cutoff: 1500 }); }); },
+  tick(urgent) { this.play(t => { this.osc(urgent ? 2200 : 1600, t, .05, { type: 'triangle', vol: urgent ? .14 : .07 }); if (urgent) this.kick(t, .25); }); },
+  fifty() { this.play(t => { this.noise(t, .25, { vol: .22, freq: 3000, to: 300 }); this.noise(t + .22, .25, { vol: .22, freq: 3000, to: 300 }); this.osc(NOTE.A5, t + .45, .3, { vol: .08 }); }); },
+  ring() { this.play(t => { for (let r = 0; r < 2; r++) for (let k = 0; k < 8; k++) this.osc(k % 2 ? 1300 : 1050, t + r * .55 + k * .05, .045, { type: 'square', vol: .05, cutoff: 4000 }); }); },
+  chatter() { this.play(t => { for (let i = 0; i < 18; i++) this.osc(300 + Math.random() * 500, t + i * .06 + Math.random() * .03, .07, { type: 'triangle', vol: .04 }); }); },
+  chime() { this.play(t => { [NOTE.E5, NOTE.G5, NOTE.C6, NOTE.E5 * 2].forEach((f, i) => this.osc(f, t + i * .09, 1, { vol: .07 })); }); },
+  finale() { this.play(t => {
+    [[NOTE.C5, 0], [NOTE.E5, .15], [NOTE.G5, .3], [NOTE.C6, .45], [NOTE.G5, .75], [NOTE.C6, .9]].forEach(([f, d]) => this.osc(f, t + d, .35, { type: 'square', vol: .06, cutoff: 3500 }));
+    [0, .45, .9].forEach(d => { this.kick(t + d, 1); this.clap(t + d, .35); });
+    this.chord([NOTE.C4, NOTE.E4, NOTE.G4, NOTE.C5], t + .9, 1.8, .06);
+    this.noise(t + .9, 2, { vol: .12, type: 'highpass', freq: 6000 });
+    this.applause(t + .5, 4.5, 1.2);
+  }); }
+};
+
+/* Nhạc nền sôi động: vòng hợp âm Am–F–C–G, 120 BPM, trống + bass + arpeggio */
+const Music = {
+  playing: false, step: 0, nextT: 0, timer: null, bpm: 120,
+  chords: [
+    { bass: NOTE.A2, notes: [NOTE.A3, NOTE.C4, NOTE.E4] },
+    { bass: NOTE.F2, notes: [NOTE.F3, NOTE.A3, NOTE.C4] },
+    { bass: NOTE.C3, notes: [NOTE.C4, NOTE.E4, NOTE.G4] },
+    { bass: NOTE.G2, notes: [NOTE.G3, NOTE.B3, NOTE.D4] }
+  ],
+  start() {
+    if (!prefs.sound || !prefs.music || this.playing || !Sound.ensure()) return;
+    const c = Sound.ctx;
+    this.playing = true; this.step = 0; this.nextT = c.currentTime + .08;
+    Sound.music.gain.cancelScheduledValues(c.currentTime); Sound.music.gain.setValueAtTime(MUSIC_VOL, c.currentTime);
+    this.timer = setInterval(() => this.tick(), 25);
+  },
+  stop() { this.playing = false; clearInterval(this.timer); this.timer = null; },
+  duck(on) {
+    if (!Sound.ctx) return;
+    const g = Sound.music.gain, t = Sound.ctx.currentTime;
+    g.cancelScheduledValues(t); g.setTargetAtTime(on ? 0.0001 : MUSIC_VOL, t, on ? .08 : .4);
+  },
+  tick() {
+    const c = Sound.ctx; if (!c || !this.playing) return;
+    while (this.nextT < c.currentTime + .15) { this.playStep(this.step, this.nextT); this.nextT += 60 / this.bpm / 4; this.step = (this.step + 1) % 64; }
+  },
+  playStep(s, t) {
+    const X = Sound, bus = X.music, ch = this.chords[Math.floor(s / 16)], st = s % 16;
+    try {
+      if (st % 4 === 0) X.kick(t, .8, bus);
+      if (st === 4 || st === 12) X.clap(t, .22, bus);
+      X.hat(t, st % 2 ? .07 : .04, bus);
+      if ([0, 3, 6, 8, 10, 11, 14].includes(st)) X.osc(ch.bass, t, .2, { type: 'sawtooth', vol: .16, cutoff: 600, bus });
+      if (st % 2 === 0) { const pat = [0, 1, 2, 1, 0, 2, 1, 2]; X.osc(ch.notes[pat[st / 2]] * 2, t, .16, { type: 'triangle', vol: .05, bus }); }
+      if (st === 0) ch.notes.forEach(f => X.osc(f, t, 1.9, { type: 'sawtooth', vol: .025, cutoff: 1100, attack: .3, bus }));
+    } catch { /* ignore audio errors */ }
+  }
 };
 
 /* ---------- Pháo giấy ---------- */
@@ -710,6 +817,14 @@ function syncSoundBtns() {
     b.replaceChildren(icon(prefs.sound ? 'sound' : 'mute'));
     b.setAttribute('aria-pressed', String(!!prefs.sound));
     b.setAttribute('aria-label', prefs.sound ? 'Tắt âm thanh' : 'Bật âm thanh');
+    b.title = b.getAttribute('aria-label');
+  }
+  const musicOn = !!prefs.music && !!prefs.sound;
+  for (const id of ['btnMusic', 'pbMusic']) {
+    const b = $('#' + id);
+    b.replaceChildren(icon(musicOn ? 'music' : 'musicOff'));
+    b.setAttribute('aria-pressed', String(musicOn));
+    b.setAttribute('aria-label', prefs.music ? 'Tắt nhạc nền' : 'Bật nhạc nền');
     b.title = b.getAttribute('aria-label');
   }
 }
@@ -785,7 +900,9 @@ function startGame() {
   $('#side').classList.remove('open');
   show('game');
   renderLifelines();
-  Sound.start();
+  Music.stop();
+  Sound.intro();
+  setTimeout(() => { if (G && !G.ended && VIEW === 'game') Music.start(); }, 1300);
   renderQuestion();
 }
 const curTeam = () => G.teams[G.cur.team];
@@ -819,7 +936,7 @@ function renderTeams() {
 function renderTurnPick() {
   $('#turnPick').replaceChildren(h('span', { text: 'Tổ trả lời:' }), ...G.teams.map((t, i) => h('button', {
     class: 'pick', type: 'button', 'aria-pressed': String(i === G.cur.team), disabled: G.locked,
-    onclick: () => { if (G.locked || i === G.cur.team) return; G.cur.team = i; if (G.cur.call === i) G.cur.call = null; G.cur.council.delete(i); afterTurnChange(); }
+    onclick: () => { if (G.locked || i === G.cur.team) return; G.cur.team = i; if (G.cur.call === i) G.cur.call = null; G.cur.council.delete(i); Sound.blip(); afterTurnChange(); }
   }, t.name)));
 }
 function afterTurnChange() {
@@ -850,6 +967,7 @@ function renderQuestion() {
   afterTurnChange();
   renderLadder();
   startTimer();
+  if (G.idx > 0) Sound.question();
 }
 const optEls = () => [...document.querySelectorAll('#options .opt')];
 function selectOpt(i) {
@@ -879,7 +997,8 @@ function lockAnswer() {
   $('#stage').classList.add('suspense');
   renderTurnPick(); syncLifelines();
   const wait = reducedMotion ? 300 : 2000;
-  Sound.roll(wait / 1000 - 0.1);
+  Music.duck(true);
+  Sound.suspense(wait / 1000);
   setTimeout(() => reveal(false), wait);
 }
 function timeUp() {
@@ -915,8 +1034,10 @@ function reveal(timeout) {
   G.log.push(entry);
   G.status[G.idx] = ok ? 'ok' : 'bad';
 
+  Music.duck(true);
+  setTimeout(() => { if (G && !G.ended) Music.duck(false); }, 2200);
   if (ok) { Sound.correct(); FX.burst(cur.src.lv === 'VDC' ? 220 : 110); banner('Chính xác!', `${team.name} +${fmtPts(gain)} điểm`); }
-  else { Sound.wrong(); banner(timeout ? 'Hết giờ!' : 'Chưa đúng', `Đáp án đúng: ${LETTERS[cur.correct]}`, true); }
+  else { if (timeout) Sound.buzzer(); else Sound.wrong(); banner(timeout ? 'Hết giờ!' : 'Chưa đúng', `Đáp án đúng: ${LETTERS[cur.correct]}`, true); }
   renderTeams(); renderLadder();
 
   const last = G.idx === G.n - 1;
@@ -951,7 +1072,7 @@ function startTimer() {
   G.timer = setInterval(() => {
     if (!G || G.locked) return stopTimer();
     G.timeLeft--; drawTimer();
-    if (G.timeLeft > 0 && G.timeLeft <= 5) Sound.tick();
+    if (G.timeLeft > 0 && G.timeLeft <= 10) Sound.tick(G.timeLeft <= 5);
     if (G.timeLeft <= 0) { stopTimer(); timeUp(); }
   }, 1000);
 }
@@ -988,7 +1109,7 @@ function useLife(key) {
   if (t.used[key]) return;
   t.used[key] = true;
   G.cur.lifes.add(key);
-  Sound.help();
+  ({ fifty: () => Sound.fifty(), call: () => Sound.ring(), council: () => Sound.chatter(), expert: () => Sound.chime() })[key]();
   const cur = G.list[G.idx];
   const bonusNote = () => h('p', { class: 'note-sm', text: `Tổ hỗ trợ được +${fmtPts(G.bonusMilli)} điểm nếu tổ được giúp trả lời đúng.` });
   if (key === 'fifty') {
@@ -999,7 +1120,7 @@ function useLife(key) {
     addTime(30);
     const out = h('span', { class: 'draw-num', text: '—' });
     const drawBtn = h('button', { class: 'btn soft', type: 'button' }, icon('dice'), 'Bốc thăm số thứ tự');
-    drawBtn.addEventListener('click', () => { out.textContent = 'Bạn số ' + (1 + Math.floor(Math.random() * RULES.classSize)); Sound.select(); });
+    drawBtn.addEventListener('click', () => { out.textContent = 'Bạn số ' + (1 + Math.floor(Math.random() * RULES.classSize)); Sound.draw(); });
     helpBlock('phone', 'Gọi điện cho người thân',
       h('p', { text: `Mời 1 bạn bất kỳ trong lớp giúp ${t.name} trả lời.` }),
       h('div', { class: 'draw-row' }, drawBtn, out),
@@ -1045,7 +1166,7 @@ function endGame() {
   G.ended = true; G.duration = Date.now() - G.startAt; G.saved = false;
   renderResult();
   show('result');
-  Sound.fanfare(); FX.rain();
+  Music.stop(); Sound.finale(); FX.rain();
 }
 function renderResult() {
   const r = ranked();
@@ -1140,7 +1261,7 @@ async function saveFile(filename, data) {
 }
 
 /* ---------- Gắn sự kiện ---------- */
-function goStart() { stopTimer(); setPresent(false); show('home'); $('#btnStart').focus({ preventScroll: true }); }
+function goStart() { stopTimer(); Music.stop(); setPresent(false); show('home'); $('#btnStart').focus({ preventScroll: true }); }
 function init() {
   setBtn($('#btnStart'), 'play', 'Bắt đầu');
   setBtn($('#btnCopyReport'), 'copy', 'Sao chép báo cáo');
@@ -1158,9 +1279,19 @@ function init() {
     if (VIEW === 'game' && G && !G.ended) { if (await confirmModal('Rời ván chơi?', 'Ván đang chơi sẽ không được lưu.', 'Rời ván', true)) { G.ended = true; goStart(); } }
     else goStart();
   });
-  const toggleSound = () => { prefs.sound = !prefs.sound; savePrefs(); syncSoundBtns(); if (prefs.sound) Sound.select(); };
+  const inGame = () => VIEW === 'game' && G && !G.ended;
+  const toggleSound = () => {
+    prefs.sound = !prefs.sound; savePrefs(); syncSoundBtns();
+    if (!prefs.sound) Music.stop(); else { Sound.select(); if (inGame()) Music.start(); }
+  };
+  const toggleMusic = () => {
+    prefs.music = !prefs.music; savePrefs(); syncSoundBtns();
+    if (!prefs.music) Music.stop(); else if (inGame()) Music.start();
+  };
   $('#btnSound').addEventListener('click', toggleSound);
   $('#pbSound').addEventListener('click', toggleSound);
+  $('#btnMusic').addEventListener('click', toggleMusic);
+  $('#pbMusic').addEventListener('click', toggleMusic);
   $('#btnFull').addEventListener('click', toggleFull);
   $('#pbFull').addEventListener('click', toggleFull);
   $('#btnPresent').addEventListener('click', () => setPresent(!document.body.classList.contains('present')));
